@@ -12,3 +12,5 @@ Configuration : Ouvrez le fichier et modifiez les variables suivantes :
 API_KEY : Remplacez par votre clé API Steam.
 
 STEAM_IDS : Remplacez par les SteamID64 des membres de votre famille. Le premier ID doit être le vôtre.
+
+ATTENTION : les DLC ajoutés par clé hors Steam seront considérés non possédés car un id n'est pas attribué par steam à l'achat.
