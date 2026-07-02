@@ -8,7 +8,11 @@ Détection de DLC : Identifie les contenus additionnels manquants pour les jeux 
 Exportation : Génère un fichier texte (resultats_dlc_manquants.txt) listant les jeux trouvés avec leur lien direct vers le magasin Steam.
 
 Configuration : Ouvrez le fichier et modifiez les variables suivantes :
+
 API_KEY : Remplacez par votre clé API Steam en allant sur https://steamcommunity.com/dev/apikey.
+
 MY_STEAM_ID : Votre propre SteamID64.
+
 STEAM_IDS : Remplacez par les SteamID64 des membres de votre famille.
+
 MY_STEAM_LOGIN_SECURE : Le cookie de session de votre compte Steam (voir instructions dans le script). Il permet de récupérer la totalité de vos jeux/DLC possédés.
