@@ -1,11 +1,38 @@
+# ============================================================
+# COMMENT RÉCUPÉRER MY_STEAM_LOGIN_SECURE (une seule fois, valable
+# plusieurs semaines/mois selon votre config Steam) :
+#
+# 1. Ouvrez https://store.steampowered.com dans votre navigateur et
+#    connectez-vous avec VOTRE compte (celui de MY_STEAM_ID).
+# 2. Appuyez sur F12 pour ouvrir les outils développeur.
+# 3. Allez dans l'onglet "Application" (Chrome/Edge) ou "Stockage" (Firefox).
+# 4. Dans "Cookies" -> "https://store.steampowered.com", cherchez la ligne
+#    "steamLoginSecure".
+# 5. Copiez toute la valeur (une longue chaîne) et collez-la dans
+#    MY_STEAM_LOGIN_SECURE en haut du script.
+#
+# Ce cookie ne donne accès qu'à ce que votre navigateur voit déjà sur le
+# site Steam (votre bibliothèque) — il ne permet pas d'acheter, de modifier
+# des paramètres, ni d'accéder aux autres comptes.
+# ============================================================
+
 import requests
 import time
 import os
 
-API_KEY = 'YOUR_STEAM_API_KEY'  # Remplacez par votre clé API Steam
+API_KEY = 'MY_API_KEY'  # Remplacez par votre clé API Steam
+
+# Votre propre SteamID64 (celui du cookie ci-dessous). Doit faire partie de STEAM_IDS.
+MY_STEAM_ID = 'USER_STEAM_ID64'  # Remplacez par votre SteamID64
 
 # Remplacez par votre SteamID64 et ceux de votre famille
-STEAM_IDS = ['YOUR_STEAM_ID', 'STEAM_ID_2', 'STEAM_ID_3']
+STEAM_IDS = [MY_STEAM_ID, 'FAMILY_MEMBER_STEAM_ID64_1', 'FAMILY_MEMBER_STEAM_ID64_2']
+
+# Cookie de session Steam pour VOTRE compte (voir instructions en bas du fichier
+# pour savoir comment le récupérer). Laissez vide pour désactiver cette méthode
+# (dans ce cas, votre compte utilisera aussi la méthode standard GetOwnedGames,
+# qui peut manquer des DLC à 0 minute de jeu).
+MY_STEAM_LOGIN_SECURE = 'MY_STEAM_LOGIN_SECURE'  # Remplacez par votre cookie de session
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
@@ -18,13 +45,13 @@ session.headers.update(HEADERS)
 details_cache = {}
 
 
-def safe_get_json(url, retries=3, pause=3):
+def safe_get_json(url, retries=3, pause=3, cookies=None):
     """Fait une requête et renvoie du JSON, ou None si ça échoue vraiment."""
     backoff = 15
 
     for attempt in range(1, retries + 1):
         try:
-            response = session.get(url, timeout=10)
+            response = session.get(url, timeout=10, cookies=cookies)
         except requests.RequestException as e:
             print(f"   Erreur réseau ({e}), tentative {attempt}/{retries}...")
             time.sleep(pause)
@@ -82,19 +109,14 @@ def get_app_names():
     return app_names
 
 
-def get_owned_games(steam_id):
+def get_owned_games_api(steam_id):
     """
-    Récupère les jeux/DLC possédés par un compte.
+    Récupère les jeux/DLC possédés via l'API publique GetOwnedGames.
 
-    CORRECTIF 1 : ajout de include_played_free_games=1 pour récupérer aussi
-    les DLC/jeux gratuits déjà lancés au moins une fois (sinon l'API Steam
-    les exclut par défaut, même si tu les possèdes).
-
-    CORRECTIF 2 : diagnostic plus clair. Un compte "public" au niveau du
-    profil peut quand même avoir le réglage spécifique "Détails du jeu"
-    (Game details) sur "Amis uniquement" -> l'API renvoie alors une liste
-    vide silencieusement. C'est la cause la plus fréquente des DLC de
-    bibliothèque familiale manquants.
+    Cette route omet souvent les DLC sans temps de jeu
+    enregistré, même quand ils sont bien possédés. C'est pour ça qu'on
+    utilise une méthode alternative pour votre propre compte (voir
+    get_owned_apps_dynamicstore ci-dessous).
     """
     url = (
         "https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/"
@@ -116,8 +138,32 @@ def get_owned_games(steam_id):
         )
         return []
 
-    print(f"ID {steam_id} : {len(games)} jeux/DLC trouvés.")
+    print(f"ID {steam_id} : {len(games)} jeux/DLC trouvés (API publique).")
     return [game['appid'] for game in games]
+
+
+def get_owned_apps_dynamicstore(login_secure_cookie):
+    """
+    Récupère TOUS les appids possédés (jeux + DLC, même à 0 minute de jeu)
+    via l'endpoint interne que Steam utilise sur le site lui-même.
+    Nécessite d'être connecté (cookie steamLoginSecure), mais aucune clé API.
+    """
+    if not login_secure_cookie:
+        return None
+
+    url = "https://store.steampowered.com/dynamicstore/userdata/"
+    data = safe_get_json(url, cookies={'steamLoginSecure': login_secure_cookie})
+
+    if not data or 'rgOwnedApps' not in data:
+        print(
+            "Échec de récupération via dynamicstore/userdata : le cookie "
+            "MY_STEAM_LOGIN_SECURE est probablement invalide ou expiré."
+        )
+        return None
+
+    owned = data['rgOwnedApps']
+    print(f"Compte perso ({MY_STEAM_ID}) : {len(owned)} jeux/DLC trouvés (méthode dynamicstore, plus fiable).")
+    return owned
 
 
 def get_app_details(appid):
@@ -150,8 +196,17 @@ def main():
 
     all_owned_apps = set()
     print("\nRécupération des bibliothèques...")
+
     for steam_id in STEAM_IDS:
-        all_owned_apps.update(get_owned_games(steam_id))
+        if steam_id == MY_STEAM_ID and MY_STEAM_LOGIN_SECURE:
+            owned = get_owned_apps_dynamicstore(MY_STEAM_LOGIN_SECURE)
+            if owned is not None:
+                all_owned_apps.update(int(a) for a in owned)
+                continue
+            print("Repli sur l'API publique pour ce compte.")
+
+        owned = get_owned_games_api(steam_id)
+        all_owned_apps.update(int(a) for a in owned)
 
     total_jeux = len(all_owned_apps)
     print(f"\nTotal des jeux/apps uniques trouvés (union des {len(STEAM_IDS)} comptes) : {total_jeux}")
@@ -174,7 +229,7 @@ def main():
             print(f"Scan en cours : {i} / {total_jeux}...", end='\r')
 
             details = get_app_details(appid)
-            dlcs_available = details.get('dlc', []) if details else []
+            dlcs_available = [int(dlc) for dlc in (details.get('dlc', []) if details else [])]
             if not dlcs_available:
                 continue
 
